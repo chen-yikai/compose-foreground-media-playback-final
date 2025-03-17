@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
@@ -28,6 +29,9 @@ class MediaPlayerService : Service() {
         private val _isPlaying = MutableStateFlow(false)
         val isPlaying: StateFlow<Boolean> = _isPlaying
 
+        private val _hasPrepare = MutableStateFlow(false)
+        val hasPrepare: StateFlow<Boolean> = _hasPrepare
+
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "media_player"
     }
@@ -35,13 +39,13 @@ class MediaPlayerService : Service() {
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSession
     private val notificationManager by lazy { getSystemService(NotificationManager::class.java) }
+    private var isForeground = false
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         createNotificationChannel()
         initializePlayer()
-        startForeground(NOTIFICATION_ID, buildNotification())
     }
 
     private val binder = LocalBinder()
@@ -53,14 +57,12 @@ class MediaPlayerService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Media Playback",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "Media player controls" }
-            notificationManager.createNotificationChannel(channel)
-        }
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Media Playback",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply { description = "Media player controls" }
+        notificationManager.createNotificationChannel(channel)
     }
 
     private fun initializePlayer() {
@@ -79,7 +81,16 @@ class MediaPlayerService : Service() {
         player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _isPlaying.value = isPlaying
-                updateNotification()
+                if (isForeground) updateNotification()
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                _hasPrepare.value = playbackState == ExoPlayer.STATE_READY
+                Log.i("kitty", _hasPrepare.value.toString())
+                if (playbackState == ExoPlayer.STATE_READY && !isForeground) {
+                    startForeground(NOTIFICATION_ID, buildNotification())
+                    isForeground = true
+                }
             }
         })
     }
@@ -146,10 +157,20 @@ class MediaPlayerService : Service() {
         player.pause()
     }
 
+    fun toggle() {
+        if (_isPlaying.value) {
+            pause()
+        } else {
+            play()
+        }
+    }
+
     fun stop() {
         player.stop()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        if (isForeground) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            isForeground = false
+        }
     }
 
     override fun onDestroy() {

@@ -52,7 +52,7 @@ fun PlayerController(audioUrl: String) {
 
         Button(
             onClick = {
-                service?.pause()
+                service?.stop()
             }
         ) {
             Text("Stop")
